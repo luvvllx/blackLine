@@ -1,0 +1,8 @@
+.DS_Store
+.idea/
+.vscode/
+out/
+outt/
+src/asmtest/
+tools/build/
+tools/stage1-build/
