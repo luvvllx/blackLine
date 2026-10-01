@@ -16,7 +16,7 @@ public final class Forge {
     }
 
     public static byte[] derive(int[] prog, int[] rmap, int[] seeds, byte[] salt,
-                                int guard, int slot) {
+                                int guard, int slot, byte[] chain) {
         int mask = seeds[0] ^ seeds[7] ^ seeds[13] ^ seeds[31] ^ 0x5bf03635;
 
         int[] r = new int[16];
@@ -142,6 +142,7 @@ public final class Forge {
             }
             md.update(salt);
             md.update((byte) 0x9e);
+            md.update(chain);
             md.update((byte) (slot >>> 24));
             md.update((byte) (slot >>> 16));
             md.update((byte) (slot >>> 8));

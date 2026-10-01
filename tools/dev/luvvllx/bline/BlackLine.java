@@ -760,6 +760,9 @@ tree.accept(cw);
         at.putValue(attrName(), hex(cfg));
         Arrays.fill(cfg, (byte) 0);
 
+        Object[] inputs = new Object[]{fr.prog, fr.rmap, fr.seeds};
+        byte[] root = dev.luvvllx.runtime.Cx.self(salt, guard, inputs, rt);
+
         Files.createDirectories(Paths.get(outJar).toAbsolutePath().getParent());
         try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(Paths.get(outJar)))) {
             jos.putNextEntry(new JarEntry("META-INF/MANIFEST.MF"));
@@ -769,9 +772,11 @@ tree.accept(cw);
                 put(jos, e.getKey(), e.getValue());
             }
 
+            byte[] ch = dev.luvvllx.runtime.Cx.chain0(root);
             for (int i = 0; i < chainBodies.size(); i++) {
-                byte[] key = fr.slotKey(i);
+                byte[] key = fr.slotKey(i, ch);
                 byte[] body = chainBodies.get(i);
+                ch = dev.luvvllx.runtime.Cx.advance(ch, body);
                 put(jos, folder + "/" + String.format("%04d.jullyCrypto", i),
                         armor(seal(key, body, TAG)));
             }
@@ -790,18 +795,16 @@ tree.accept(cw);
         };
     }
 
-    private static byte[] renameForge(byte[] bytes, String owner) {
+    private static byte[] renameForge(byte[] bytes, final String owner) {
+        final String oldName = "dev/luvvllx/runtime/Forge";
+        Remapper r = new Remapper() {
+            @Override
+            public String map(String internalName) {
+                return internalName.equals(oldName) ? owner : internalName;
+            }
+        };
         ClassWriter cw = new ClassWriter(0);
-        new ClassReader(bytes).accept(new org.objectweb.asm.ClassVisitor(Opcodes.ASM9, cw) {
-            @Override
-            public void visit(int v, int access, String name, String sig, String sup, String[] itf) {
-                super.visit(v, access, owner, sig, sup, itf);
-            }
-
-            @Override
-            public void visitSource(String source, String debug) {
-            }
-        }, 0);
+        new ClassReader(bytes).accept(new org.objectweb.asm.commons.ClassRemapper(cw, r), 0);
         return cw.toByteArray();
     }
 
@@ -823,8 +826,8 @@ tree.accept(cw);
             this.guard = guard;
         }
 
-        byte[] slotKey(int i) {
-            return dev.luvvllx.runtime.Forge.derive(prog.clone(), rmap.clone(), seeds, salt, guard, i);
+        byte[] slotKey(int i, byte[] chain) {
+            return dev.luvvllx.runtime.Forge.derive(prog.clone(), rmap.clone(), seeds, salt, guard, i, chain);
         }
     }
 

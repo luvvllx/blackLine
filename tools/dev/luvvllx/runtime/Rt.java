@@ -12,10 +12,19 @@ public final class Rt {
 
     private static final Map<String, String> CACHE = new ConcurrentHashMap<>();
 
+    public static volatile byte[] ROOT;
+
     private Rt() {
     }
 
+    private static void warm() {
+        if (ROOT == null) {
+            throw new IllegalStateException("cold");
+        }
+    }
+
     public static String a(String enc, int key) {
+        warm();
         String hit = CACHE.get(enc);
         if (hit != null) {
             return hit;
@@ -46,8 +55,8 @@ public final class Rt {
     public static CallSite b(MethodHandles.Lookup l, String tag, MethodType site,
                              String eo, int k1, String en, int k2, String ed, int k3, int kind) {
         try {
+            warm();
             ClassLoader cl = l.lookupClass().getClassLoader();
-
             Class<?> owner = Class.forName(Cx.decode(eo, k1).replace('/', '.'), false, cl);
             String name = Cx.decode(en, k2);
             MethodType mt = MethodType.fromMethodDescriptorString(Cx.decode(ed, k3), cl);

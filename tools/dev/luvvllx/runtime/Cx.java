@@ -2,6 +2,8 @@ package dev.luvvllx.runtime;
 
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Map;
+import java.util.TreeMap;
 
 public final class Cx {
 
@@ -31,14 +33,14 @@ public final class Cx {
         return new Object[]{tbl.getMethod("p").invoke(null), tbl.getMethod("g").invoke(null), seeds};
     }
 
-    public static byte[] slot(Object[] inputs, byte[] salt, int guard, int slot) throws Exception {
+    public static byte[] slot(Object[] inputs, byte[] salt, int guard, int slot, byte[] chain) throws Exception {
         java.lang.invoke.MethodHandles.Lookup lk = java.lang.invoke.MethodHandles.lookup();
         java.lang.invoke.MethodHandles.Lookup made = lk.defineHiddenClass(forgeBytes(), true);
         java.lang.invoke.MethodHandle derive = made.findStatic(made.lookupClass(), "derive",
                 java.lang.invoke.MethodType.methodType(byte[].class,
-                        int[].class, int[].class, int[].class, byte[].class, int.class, int.class));
+                        int[].class, int[].class, int[].class, byte[].class, int.class, int.class, byte[].class));
         try {
-            return (byte[]) derive.invokeWithArguments(inputs[0], inputs[1], inputs[2], salt, guard, slot);
+            return (byte[]) derive.invokeWithArguments(inputs[0], inputs[1], inputs[2], salt, guard, slot, chain);
         } catch (Throwable t) {
             throw new IllegalStateException(t);
         } finally {
@@ -47,8 +49,7 @@ public final class Cx {
         }
     }
 
-    private static byte[] forgeBytes() throws Exception {
-
+    public static byte[] forgeBytes() throws Exception {
         String here = Cx.class.getName();
         String pkg = here.substring(0, here.lastIndexOf('.') + 1).replace('.', '/');
         try (java.io.InputStream in = Cx.class.getResourceAsStream("/" + pkg + "fg.class")) {
@@ -62,6 +63,51 @@ public final class Cx {
         }
     }
 
+    public static byte[] sha(byte[]... parts) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        for (byte[] p : parts) {
+            if (p != null) {
+                md.update(p);
+            }
+        }
+        return md.digest();
+    }
+
+    private static byte[] be(int v) {
+        return new byte[]{(byte) (v >>> 24), (byte) (v >>> 16), (byte) (v >>> 8), (byte) v};
+    }
+
+    public static byte[] ints(int[] a) {
+        byte[] out = new byte[a.length * 4];
+        for (int i = 0; i < a.length; i++) {
+            System.arraycopy(be(a[i]), 0, out, i * 4, 4);
+        }
+        return out;
+    }
+
+    public static byte[] self(byte[] salt, int guard, Object[] inputs, Map<String, byte[]> boot) throws Exception {
+        TreeMap<String, byte[]> sorted = new TreeMap<>(boot);
+        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+        for (Map.Entry<String, byte[]> e : sorted.entrySet()) {
+            byte[] nb = e.getKey().getBytes("UTF-8");
+            bo.write(be(nb.length));
+            bo.write(nb);
+            byte[] b = e.getValue();
+            bo.write(be(b.length));
+            bo.write(b);
+        }
+        return sha(salt, be(guard), be(((int[]) inputs[0]).length), ints((int[]) inputs[0]),
+                ints((int[]) inputs[1]), ints((int[]) inputs[2]), bo.toByteArray());
+    }
+
+    public static byte[] chain0(byte[] root) throws Exception {
+        return sha(new byte[]{0x63, 0x30}, root);
+    }
+
+    public static byte[] advance(byte[] chain, byte[] body) throws Exception {
+        return sha(chain, body);
+    }
+
     public static byte[] digest(byte[] master, byte[] salt) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         md.update(master);
@@ -70,7 +116,7 @@ public final class Cx {
         return md.digest();
     }
 
-public static byte[] crypt(byte[] key, byte[] data) throws Exception {
+    public static byte[] crypt(byte[] key, byte[] data) throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         byte[] out = new byte[data.length];
         byte[] buf = new byte[key.length + 4];

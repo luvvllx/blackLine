@@ -73,12 +73,16 @@ public final class Boot {
         String folder = new String(cfg, SALT + 1, folderLen);
         int guard = cfg[SALT + 1 + folderLen] & 0xff;
 
-        boolean tampered = (guard & 1) != 0 && inspect();
-        if (tampered) {
-            guard = 0xff;
+        if (inspect()) {
+            guard ^= 0xff;
         }
 
         INPUTS = dev.luvvllx.runtime.Cx.load(Boot.class.getClassLoader(), salt);
+
+        BOOTREF = bootBytes(self);
+        ROOT = dev.luvvllx.runtime.Cx.self(salt, guard, INPUTS, BOOTREF);
+        dev.luvvllx.runtime.Rt.ROOT = ROOT;
+        CHAIN = dev.luvvllx.runtime.Cx.chain0(ROOT);
 
         List<byte[]> files = read(self, folder);
         if (files.size() < 3) {
@@ -86,6 +90,9 @@ public final class Boot {
         }
 
         byte[] head = take(files, salt, guard);
+        if (head == null) {
+            die(2);
+        }
         int a = num(head, 0);
         if (a <= 0 || a > head.length - 9) {
             die(3);
@@ -99,6 +106,9 @@ public final class Boot {
         Arrays.fill(head, (byte) 0);
 
         byte[] idx = take(files, salt, guard);
+        if (idx == null) {
+            die(3);
+        }
         int count = num(idx, 0);
         if (count <= 0 || count > 4096) {
             die(3);
@@ -144,7 +154,7 @@ public final class Boot {
                 Arrays.fill(frag, (byte) 0);
             }
             if (broke || have != totals[c]) {
-                break;
+                die(6);
             }
             if (loader.known(names[c])) {
                 Arrays.fill(whole, (byte) 0);
@@ -202,6 +212,8 @@ public final class Boot {
         if (m == null) {
             die(5);
         }
+        SELF = self;
+        startWatch();
         m.setAccessible(true);
         m.invoke(null, (Object) args);
     }
@@ -216,12 +228,18 @@ public final class Boot {
         byte[] body = null;
         byte[] sealed = null;
         try {
-
-            fk = Cx.slot(INPUTS, salt, guard, i);
+            fk = Cx.slot(INPUTS, salt, guard, i, CHAIN);
             sealed = dearmor(blob);
             body = sealed == null ? null : unwrap(sealed, fk);
         } catch (Exception e) {
             body = null;
+        }
+        if (body != null) {
+            try {
+                CHAIN = Cx.advance(CHAIN, body);
+            } catch (Exception e) {
+                body = null;
+            }
         }
         Arrays.fill(blob, (byte) 0);
         Arrays.fill(fk, (byte) 0);
@@ -233,7 +251,59 @@ public final class Boot {
     }
 
     private static Object[] INPUTS;
+    private static byte[] ROOT;
+    private static byte[] CHAIN;
+    private static Map<String, byte[]> BOOTREF;
+    private static File SELF;
     private static int at;
+
+    private static void startWatch() {
+        Thread w = new Thread(() -> {
+            long d = 1500L + (ROOT[0] & 0xff) * 4L;
+            while (true) {
+                try {
+                    Thread.sleep(d);
+                    Map<String, byte[]> fresh = bootBytes(SELF);
+                    if (fresh.size() != BOOTREF.size()) {
+                        System.exit(0);
+                    }
+                    for (Map.Entry<String, byte[]> e : BOOTREF.entrySet()) {
+                        byte[] g = fresh.get(e.getKey());
+                        if (g == null || !java.util.Arrays.equals(g, e.getValue())) {
+                            System.exit(0);
+                        }
+                    }
+                } catch (Throwable t) {
+                    System.exit(0);
+                }
+            }
+        });
+        w.setDaemon(true);
+        w.start();
+    }
+
+    private static Map<String, byte[]> bootBytes(File self) throws Exception {
+        Map<String, byte[]> out = new HashMap<>();
+        if (self == null || !self.isFile()) {
+            return out;
+        }
+        JarFile jf = new JarFile(self);
+        try {
+            Enumeration<JarEntry> en = jf.entries();
+            while (en.hasMoreElements()) {
+                JarEntry je = en.nextElement();
+                String n = je.getName();
+                if (n.endsWith(".class")) {
+                    InputStream in = jf.getInputStream(je);
+                    out.put(n, drain(in));
+                    in.close();
+                }
+            }
+        } finally {
+            jf.close();
+        }
+        return out;
+    }
 
     private static String attr() {
         char[] c = {'M', 'l', '*', 'g'};
@@ -279,8 +349,7 @@ public final class Boot {
         } catch (Throwable ignored) {
         }
         return look("net.bytebuddy.agent.ByteBuddyAgent")
-                || look("net.bytebuddy.agent.Installer")
-                || look("com.sun.tools.attach.VirtualMachine");
+                || look("net.bytebuddy.agent.Installer");
     }
 
     private static boolean look(String n) {
