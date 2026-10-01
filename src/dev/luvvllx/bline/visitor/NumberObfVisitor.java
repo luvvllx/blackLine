@@ -21,22 +21,32 @@ public class NumberObfVisitor extends AbstractVisitor {
     private final String seedStr2;
     private final int seedInt;
     private final long randomSeed;
-    private final int constKey;
     private ClassNode cn;
 
-    private String fieldName;
+    private String[] fieldNames;
+    private int[] keyPool;
+    private int currentSlot;
 
     public NumberObfVisitor(byte[] bytes, String[] args) {
         super(bytes, args);
         this.randomSeed = (long) (seedStr1 = Utils.spawnRandomChar(10, true)).hashCode() * (seedStr2 = Utils.spawnRandomChar(10, true)).hashCode() * (seedInt = Utils.getRandomSafeLineNumber());
-        this.constKey = new Random(randomSeed).nextInt();
     }
 
     @Override
     public byte[] transfer(byte[] bytes) {
         ClassNode cn = this.cn = byteToClassNode(bytes);
 
-        {
+        List<MethodNode> keyed = new java.util.ArrayList<>();
+        for(MethodNode method : cn.methods) {
+            if(!isClinitNode(method)) keyed.add(method);
+        }
+
+        fieldNames = buildFieldNames(cn, keyed.size());
+        keyPool = new int[fieldNames.length];
+        Random poolRandom = new Random(randomSeed);
+        for(int i = 0;i < keyPool.length;i++) keyPool[i] = poolRandom.nextInt();
+
+        if(fieldNames.length > 0) {
             MethodNode clinitNode = getOrCreateClinitNode(cn);
             InsnList insnList = new InsnList();
 
@@ -72,15 +82,23 @@ public class NumberObfVisitor extends AbstractVisitor {
             insnList.add(new InsnNode(Opcodes.LMUL));
 
             insnList.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, "java/util/Random", "<init>", "(J)V"));
-            insnList.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/util/Random", "nextInt", "()I"));
-            insnList.add(new FieldInsnNode(Opcodes.PUTSTATIC, cn.name, getFieldName(cn), "I"));
+
+            for(int i = 0;i < fieldNames.length;i++) {
+                insnList.add(new InsnNode(Opcodes.DUP));
+                insnList.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/util/Random", "nextInt", "()I"));
+                insnList.add(new FieldInsnNode(Opcodes.PUTSTATIC, cn.name, fieldNames[i], "I"));
+                cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL, fieldNames[i], "I", null, null));
+            }
+            insnList.add(new InsnNode(Opcodes.POP));
             insnList.add(clinitNode.instructions);
 
             clinitNode.instructions = insnList;
-            cn.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL, getFieldName(cn), "I", null, null));
         }
 
+        int slot = 0;
         for (MethodNode method : cn.methods) {
+            if(isClinitNode(method)) currentSlot = 0;
+            else currentSlot = slot++;
             InsnList insnList = new InsnList();
             for (AbstractInsnNode insnNode : method.instructions) {
                 if(insnNode instanceof LdcInsnNode) {
@@ -158,14 +176,22 @@ public class NumberObfVisitor extends AbstractVisitor {
                 insnList.add(new LdcInsnNode(pairs[0]));
                 insnList.add(new LdcInsnNode(pairs[1]));
             } else {
+                int slot = instance.currentSlot % instance.keyPool.length;
+                int key = instance.keyPool[slot];
+                String field = instance.fieldNames[slot];
+                int salt = Utils.r.nextInt();
                 if(Utils.r.nextBoolean()) {
                     insnList.add(new LdcInsnNode(pairs[0]));
-                    insnList.add(new LdcInsnNode(pairs[1] ^ instance.constKey));
-                    insnList.add(new FieldInsnNode(Opcodes.GETSTATIC, instance.cn.name, instance.getFieldName(instance.cn), "I"));
+                    insnList.add(new LdcInsnNode(pairs[1] ^ key ^ salt));
+                    insnList.add(new FieldInsnNode(Opcodes.GETSTATIC, instance.cn.name, field, "I"));
+                    insnList.add(new InsnNode(Opcodes.IXOR));
+                    insnList.add(new LdcInsnNode(salt));
                     insnList.add(new InsnNode(Opcodes.IXOR));
                 } else {
-                    insnList.add(new LdcInsnNode(pairs[0] ^ instance.constKey));
-                    insnList.add(new FieldInsnNode(Opcodes.GETSTATIC, instance.cn.name, instance.getFieldName(instance.cn), "I"));
+                    insnList.add(new LdcInsnNode(pairs[0] ^ key ^ salt));
+                    insnList.add(new FieldInsnNode(Opcodes.GETSTATIC, instance.cn.name, field, "I"));
+                    insnList.add(new InsnNode(Opcodes.IXOR));
+                    insnList.add(new LdcInsnNode(salt));
                     insnList.add(new InsnNode(Opcodes.IXOR));
                     insnList.add(new LdcInsnNode(pairs[1]));
                 }
@@ -307,17 +333,28 @@ public class NumberObfVisitor extends AbstractVisitor {
         return new long[] {a, b};
     }
 
-    private String getFieldName(ClassNode cn) {
-        if(fieldName == null) {
-            int i = 0;
+    private String[] buildFieldNames(ClassNode cn, int count) {
+        String[] names = new String[count];
+        for(int i = 0;i < count;i++) {
+            String name = null;
+            int tries = 0;
             do {
-                i++;
-                fieldName = Utils.getRandomNameFromMap();
-            } while(i < 100 && cn.fields.stream().anyMatch(f -> f.name.equals(fieldName)));
+                tries++;
+                name = Utils.getRandomNameFromMap();
+            } while(tries < 100 && exists(cn, names, i, name));
+            if(name == null || exists(cn, names, i, name)) {
+                name = "_" + Utils.getRandomNameFromMap() + "_" + i;
+            }
+            names[i] = name;
         }
-        if(fieldName == null) {
-            fieldName = "_" + Utils.getRandomNameFromMap() + "_";
+        return names;
+    }
+
+    private static boolean exists(ClassNode cn, String[] names, int len, String name) {
+        if(name == null) return true;
+        for(int j = 0;j < len;j++) {
+            if(name.equals(names[j])) return true;
         }
-        return fieldName;
+        return cn.fields.stream().anyMatch(f -> f.name.equals(name));
     }
 }

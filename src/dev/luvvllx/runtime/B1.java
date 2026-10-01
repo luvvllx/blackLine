@@ -147,7 +147,7 @@ public class B1 implements Serializable {
 
 	}
 
-	public static Object dynBootstrap(Object lookup, Object idk, Object mt, Object type, Object clazz, Object method, Object des) {
+	public static Object dynBootstrapPlain(Object lookup, Object idk, Object mt, Object type, Object clazz, Object method, Object des) {
 
 		try {
 
